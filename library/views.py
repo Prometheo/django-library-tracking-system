@@ -1,7 +1,10 @@
+from datetime import timedelta
+from django.db.models import Q
+from django.db.models.aggregates import Count
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from .models import Author, Book, Member, Loan
-from .serializers import AuthorSerializer, BookSerializer, MemberSerializer, LoanSerializer
+from .serializers import AuthorSerializer, BookSerializer, ExtendDueDateRequestSerializer, MemberSerializer, LoanSerializer
 from rest_framework.decorators import action
 from django.utils import timezone
 from .tasks import send_loan_notification
@@ -11,7 +14,7 @@ class AuthorViewSet(viewsets.ModelViewSet):
     serializer_class = AuthorSerializer
 
 class BookViewSet(viewsets.ModelViewSet):
-    queryset = Book.objects.all()
+    queryset = Book.objects.select_related("author").all()
     serializer_class = BookSerializer
 
     @action(detail=True, methods=['post'])
@@ -49,6 +52,38 @@ class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
 
+
+    @action(detail=False, methods=['get'])
+    def top_active(self, request, pk=None):
+        top_members = Member.objects.annotate(total_loans=Count("loans", Q(is_returned=False))).select_related("user").filter(total_loans__gte=1).order_by("-total_loans")
+
+        response_data = [
+            {"id": top_member.id, "username": top_member.user.username, "email": top_member.user.email, "active_loans": top_member.total_loans} for top_member in top_members
+        ]
+
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+
 class LoanViewSet(viewsets.ModelViewSet):
     queryset = Loan.objects.all()
     serializer_class = LoanSerializer
+
+
+    @action(detail=True, methods=['post'])
+    def extend_due_date(self, request, pk=None):
+        data = request.data
+        serialized_data = ExtendDueDateRequestSerializer(data=data)
+        if serialized_data.is_valid(): # serializer validates that day is positive
+            loan = self.get_object()
+            if loan.due_date < timezone.now().date():
+                return Response({'error': 'Loan already expired, Please Return Book!'}, status=status.HTTP_400_BAD_REQUEST)
+            if loan.is_returned:
+                return Response({'error': 'Book already returned'}, status=status.HTTP_400_BAD_REQUEST)
+            loan.due_date += timedelta(days=serialized_data.validated_data.get("additional_days"))
+            loan.save()
+            return Response({
+                'status': 'Loan date Extended SUccessfully.',
+                'new_date': loan.due_date
+            }, status=status.HTTP_200_OK)
+        return Response({'error': serialized_data.errors}, status=status.HTTP_400_BAD_REQUEST)

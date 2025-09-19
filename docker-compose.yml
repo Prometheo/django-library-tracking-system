@@ -1,45 +1,57 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  db:
-    image: postgres:13
-    environment:
-      POSTGRES_DB: library_db
-      POSTGRES_USER: library_user
-      POSTGRES_PASSWORD: library_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    db:
+        image: postgres:13
+        environment:
+            POSTGRES_DB: library_db
+            POSTGRES_USER: library_user
+            POSTGRES_PASSWORD: library_password
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        ports:
+            - "5432:5432"
 
-  redis:
-    image: redis:6
-    ports:
-      - "6379:6379"
+    redis:
+        image: redis:6
+        ports:
+            - "6379:6379"
 
-  web:
-    build: .
-    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
-    volumes:
-      - .:/code
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      - db
-      - redis
+    web:
+        build: .
+        command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+        volumes:
+            - .:/code
+        ports:
+            - "8000:8000"
+        env_file:
+            - .env
+        depends_on:
+            - db
+            - redis
 
-  celery:
-    build: .
-    command: celery -A library_system worker -l info
-    volumes:
-      - .:/code
-    env_file:
-      - .env
-    depends_on:
-      - web
-      - redis
+    celery:
+        build: .
+        command: celery -A library_system worker -l info
+        volumes:
+            - .:/code
+        env_file:
+            - .env
+        depends_on:
+            - web
+            - redis
+
+    celery-beat:
+        build: .
+        command: celery -A library_system beat -l info
+        volumes:
+            - .:/code
+        env_file:
+            - .env
+        depends_on:
+            - web
+            - redis
+            - celery
 
 volumes:
-  postgres_data:
+    postgres_data:
